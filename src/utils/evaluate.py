@@ -7,31 +7,26 @@ from math_verify import parse, verify, LatexExtractionConfig
 
 
 def verify_single_sample(item):
-    config = LatexExtractionConfig(
-        normalization_config={"lowercase": True}, boxed_match_priority=0
-    )
 
-    model_out = item.get("model_output", "")
-    raw_gold = item.get("gold_answer", "")
-
-    if raw_gold and "####" in raw_gold:
-        clean_gold = raw_gold.split("####")[1].strip()
-    else:
-        clean_gold = raw_gold
+    model_out = item["model_output"]
+    raw_gold = item["gold_answer"]
 
     try:
-        parsed_pred = parse(model_out, extraction_config=config)
-        parsed_gold = parse(clean_gold, extraction_config=config)
+        parsed_pred = parse(model_out)
+        parsed_gold = parse(raw_gold)
         is_correct = verify(parsed_gold, parsed_pred)
     except Exception as e:
-        parsed_pred = str(e)
+        print(e)
+        parsed_pred = []
         is_correct = False
+
+    model_extracted = parsed_pred[0] if isinstance(parsed_pred, list) and len(parsed_pred) > 0 else ""
 
     return {
         "question": item.get("question"),
         "correct": is_correct,
-        "gold_extracted": clean_gold,
-        "model_extracted": str(parsed_pred),
+        "gold_extracted": parsed_gold,
+        "model_extracted": model_extracted,
     }
 
 

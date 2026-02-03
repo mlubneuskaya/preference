@@ -7,11 +7,11 @@ from datasets import load_dataset
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
-    TrainingArguments,
+    BitsAndBytesConfig,
 )
 
 from peft import LoraConfig, TaskType
-from trl import SFTTrainer
+from trl import SFTTrainer, SFTConfig
 
 
 def train_sft(
@@ -20,24 +20,31 @@ def train_sft(
     formatting_function: Callable,
     output_dir: str,
     log_file: str,
-    num_train_epochs: int = 1,
+    num_train_epochs: int = 3,
     per_device_train_batch_size: int = 32,
-    gradient_accumulation_steps: int = 4,
-    learning_rate: float = 2e-4,
+    gradient_accumulation_steps: int = 2,
+    learning_rate: float = 2e-5,
     lora_r: int = 16,
     lora_alpha: int = 32,
     lora_dropout: float = 0.05,
 ):
     dataset = load_dataset(dataset_path, "main", split="train")
-    dataset = dataset.map(formatting_function, num_proc=16)
+    dataset = dataset.map(formatting_function)
 
     tokenizer = AutoTokenizer.from_pretrained(model_id)
-    tokenizer.padding_side = "right"
+    tokenizer.pad_token = tokenizer.eos_token
+
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16,
+    )
 
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
-        dtype=torch.bfloat16,
+        quantization_config=bnb_config,
         device_map="auto",
+        dtype=torch.bfloat16,
     )
 
     peft_config = LoraConfig(
@@ -57,27 +64,27 @@ def train_sft(
         ],
     )
 
-    training_args = TrainingArguments(
+    training_args = SFTConfig(
         output_dir=output_dir,
         num_train_epochs=num_train_epochs,
         per_device_train_batch_size=per_device_train_batch_size,
-        gradient_accumulation_steps=gradient_accumulation_steps,
+        logging_dir=os.path.join(output_dir, "logs"),
         learning_rate=learning_rate,
         logging_steps=10,
+        save_strategy="no",
+        remove_unused_columns=False,
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        fp16=False,
         bf16=True,
-        optim="adamw_torch",
-        save_strategy="epoch",
-        logging_dir=os.path.join(output_dir, "logs"),
-        report_to="none",
-        dataloader_num_workers=8,
+        dataset_text_field="messages",
     )
 
     trainer = SFTTrainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
-        tokenizer=tokenizer,
         peft_config=peft_config,
+        processing_class=tokenizer,
     )
 
     trainer.train()
